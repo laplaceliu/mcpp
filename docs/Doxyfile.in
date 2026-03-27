@@ -1,0 +1,50 @@
+# Doxyfile for MCPP API Documentation
+
+# Project identification
+PROJECT_NAME           = "MCPP - Modern C++ MCP Framework"
+PROJECT_NUMBER         = 1.0.0
+PROJECT_BRIEF          = "A Modern C++ implementation of the Model Context Protocol"
+OUTPUT_DIRECTORY       = docs/doxygen
+CREATE_SUBDIRS         = YES
+
+# C++ language settings
+OPTIMIZE_OUTPUT_FOR_C++ = YES
+TAB_SIZE               = 4
+BUILTIN_STL_SUPPORT    = YES
+CPP_CLI_SUPPORT        = NO
+SIP_SUPPORT            = NO
+
+# Source browsing
+SOURCE_BROWSER         = YES
+INLINE_SOURCES         = YES
+REFERENCED_BY_RELATION = YES
+REFERENCES_RELATION    = YES
+VERBATIM_HEADERS       = YES
+
+# HTML output
+GENERATE_HTML          = YES
+HTML_OUTPUT            = html
+HTML_HEADER            =
+HTML_FOOTER            =
+HTML_STYLESHEET        =
+GENERATE_TREEVIEW      = YES
+TREEVIEW_WIDTH         = 250
+
+# LaTeX output (disabled by default)
+GENERATE_LATEX         = NO
+
+# Qt Help output (disabled by default)
+GENERATE_QHP           = NO
+
+# Custom extension mapping for C++ header files
+FILE_PATTERNS          = *.hpp *.cpp
+RECURSIVE              = YES
+EXCLUDE                = _deps
+EXCLUDE_PATTERNS       = */test* */example*
+
+# Index file
+GENERATE_INDEX         = YES
+COLS_IN_ALPHA_INDEX    = 2
+
+# Mark documentation groups
+@TODO_IGNORE            = YES
