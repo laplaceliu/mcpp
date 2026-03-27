@@ -1,90 +1,15 @@
 /**
  * @file transport.hpp
- * @brief Abstract transport layer interface
+ * @brief Abstract transport layer interface and factory
+ *
+ * This header is provided for backwards compatibility.
+ * For new code, consider including:
+ *   - itransport.hpp   : ITransport interface only
+ *   - factory.hpp      : ITransport + TransportFactory + all transports
+ *   - stdio.hpp        : Stdio transport only
+ *   - http.hpp         : HTTP transport only
+ *   - websocket.hpp    : WebSocket transport only
  */
 #pragma once
 
-#include <string>
-#include <functional>
-#include <memory>
-
-namespace mcpp {
-
-/**
- * @brief Abstract transport interface
- * @details Implementations provide message delivery mechanisms
- *         (e.g., stdio, HTTP/SSE, WebSocket)
- */
-class ITransport {
-public:
-    virtual ~ITransport() = default;
-
-    /**
-     * @brief Start the transport
-     * @return true if started successfully
-     */
-    virtual bool start() = 0;
-
-    /**
-     * @brief Stop the transport
-     */
-    virtual void stop() = 0;
-
-    /**
-     * @brief Send a message
-     * @param message JSON string to send
-     * @return true if sent successfully
-     */
-    virtual bool send(const std::string& message) = 0;
-
-    /**
-     * @brief Set message received callback
-     * @param handler Callback function invoked with received message
-     */
-    using MessageHandler = std::function<void(const std::string&)>;
-    virtual void on_message(MessageHandler handler) = 0;
-
-    /**
-     * @brief Set error callback
-     * @param handler Callback function invoked on errors
-     */
-    using ErrorHandler = std::function<void(const std::string&)>;
-    virtual void on_error(ErrorHandler handler) = 0;
-
-    /**
-     * @brief Check if transport is connected
-     * @return true if connected
-     */
-    virtual bool is_connected() const = 0;
-};
-
-/**
- * @brief Factory for creating transport instances
- */
-class TransportFactory {
-public:
-    /**
-     * @brief Transport type enumeration
-     */
-    enum class Type {
-        Stdio,     ///< Standard I/O transport
-        Http,      ///< HTTP/SSE transport
-        WebSocket  ///< WebSocket transport
-    };
-
-    /**
-     * @brief Create a transport by type
-     * @param type Transport type to create
-     * @return Unique pointer to transport, or nullptr if type not supported
-     */
-    static std::unique_ptr<ITransport> create(Type type);
-
-    /**
-     * @brief Create a transport by name
-     * @param type Transport name ("stdio", "http", "websocket")
-     * @return Unique pointer to transport, or nullptr if not found
-     */
-    static std::unique_ptr<ITransport> create(const std::string& type);
-};
-
-} // namespace mcpp
+#include "factory.hpp"

@@ -20,7 +20,13 @@ public:
      * @param result Result value
      * @return Success response
      */
-    static JsonRpcResponse success(const JsonValue& id, const JsonValue& result);
+    static JsonRpcResponse success(const JsonValue& id, const JsonValue& result) {
+        JsonRpcResponse resp;
+        resp.id = id;
+        resp.result = result;
+        resp.is_error = false;
+        return resp;
+    }
 
     /**
      * @brief Create an error response with ErrorCode
@@ -29,7 +35,9 @@ public:
      * @param message Error message
      * @return Error response
      */
-    static JsonRpcResponse error(const JsonValue& id, ErrorCode code, const std::string& message);
+    static JsonRpcResponse error(const JsonValue& id, ErrorCode code, const std::string& message) {
+        return error(id, static_cast<int>(code), message);
+    }
 
     /**
      * @brief Create an error response with ErrorCode and data
@@ -39,7 +47,9 @@ public:
      * @param data Additional error data
      * @return Error response
      */
-    static JsonRpcResponse error(const JsonValue& id, ErrorCode code, const std::string& message, const JsonValue& data);
+    static JsonRpcResponse error(const JsonValue& id, ErrorCode code, const std::string& message, const JsonValue& data) {
+        return error(id, static_cast<int>(code), message, data);
+    }
 
     /**
      * @brief Create an error response with int code
@@ -48,7 +58,9 @@ public:
      * @param message Error message
      * @return Error response
      */
-    static JsonRpcResponse error(const JsonValue& id, int code, const std::string& message);
+    static JsonRpcResponse error(const JsonValue& id, int code, const std::string& message) {
+        return error(id, code, message, JsonValue::object());
+    }
 
     /**
      * @brief Create an error response with int code and data
@@ -58,7 +70,19 @@ public:
      * @param data Additional error data
      * @return Error response
      */
-    static JsonRpcResponse error(const JsonValue& id, int code, const std::string& message, const JsonValue& data);
+    static JsonRpcResponse error(const JsonValue& id, int code, const std::string& message, const JsonValue& data) {
+        JsonRpcResponse resp;
+        resp.id = id;
+        resp.is_error = true;
+        resp.error = {
+            {"code", code},
+            {"message", message}
+        };
+        if (!data.is_null()) {
+            resp.error["data"] = data;
+        }
+        return resp;
+    }
 };
 
 /**

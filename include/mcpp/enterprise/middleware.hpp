@@ -96,14 +96,29 @@ public:
      * @brief Add a middleware to the chain
      * @param middleware Middleware to add
      */
-    void add(std::shared_ptr<Middleware> middleware);
+    void add(std::shared_ptr<Middleware> middleware) {
+        middlewares_.push_back(middleware);
+
+        // Chain the middlewares
+        if (middlewares_.size() > 1) {
+            middlewares_[middlewares_.size() - 2]->set_next(middleware);
+        }
+    }
 
     /**
      * @brief Execute the filter chain
      * @param ctx Request context
      * @return true if all middleware passed, false if rejected
      */
-    bool execute(RequestContext& ctx);
+    bool execute(RequestContext& ctx) {
+        for (size_t i = 0; i < middlewares_.size(); ++i) {
+            MiddlewareResult result = middlewares_[i]->process(ctx);
+            if (result != MiddlewareResult::Continue) {
+                return false;
+            }
+        }
+        return true;
+    }
 
     /**
      * @brief Get middleware count

@@ -88,66 +88,13 @@ include_directories(
 )
 
 # Source files
-set(MCPP_CORE_SOURCES
-    src/core/json.cpp
-    src/core/error.cpp
-)
+# Note: All implementations are now header-only.
+# No .cpp files need to be compiled for the mcpp library itself.
 
-set(MCPP_PROTOCOL_SOURCES
-    src/protocol/message.cpp
-    src/protocol/request.cpp
-    src/protocol/response.cpp
-)
-
-set(MCPP_TRANSPORT_SOURCES
-    src/transport/transport.cpp
-    src/transport/stdio.cpp
-    src/transport/http.cpp
-    src/transport/websocket.cpp
-)
-
-set(MCPP_SERVER_SOURCES
-    src/server/server.cpp
-    src/server/tool.cpp
-    src/server/resource.cpp
-    src/server/prompt.cpp
-)
-
-set(MCPP_CLIENT_SOURCES
-    src/client/client.cpp
-)
-
-set(MCPP_ENTERPRISE_SOURCES
-    src/enterprise/middleware.cpp
-    src/enterprise/ratelimit.cpp
-    src/enterprise/circuit.cpp
-    src/enterprise/metrics.cpp
-    src/enterprise/auth.cpp
-)
-
-set(MCPP_ALL_SOURCES
-    ${MCPP_CORE_SOURCES}
-    ${MCPP_PROTOCOL_SOURCES}
-    ${MCPP_TRANSPORT_SOURCES}
-    ${MCPP_SERVER_SOURCES}
-    ${MCPP_CLIENT_SOURCES}
-    ${MCPP_ENTERPRISE_SOURCES}
-)
-
-# Static library
-add_library(mcpp_static STATIC ${MCPP_ALL_SOURCES})
-target_compile_definitions(mcpp_static PUBLIC MCPP_STATIC)
-target_link_libraries(mcpp_static OpenSSL::SSL OpenSSL::Crypto ${LIBWEBSOCKETS_LIBRARY})
-set_target_properties(mcpp_static PROPERTIES OUTPUT_NAME mcpp)
-
-# Shared library
-add_library(mcpp_shared SHARED ${MCPP_ALL_SOURCES})
-set_target_properties(mcpp_shared PROPERTIES OUTPUT_NAME mcpp)
-target_compile_definitions(mcpp_shared PUBLIC MCPP_EXPORTS)
-target_link_libraries(mcpp_shared OpenSSL::SSL OpenSSL::Crypto ${LIBWEBSOCKETS_LIBRARY})
-
-# Main library
-add_library(mcpp ALIAS mcpp_static)
+# Header-only library - use INTERFACE library
+add_library(mcpp INTERFACE)
+target_include_directories(mcpp INTERFACE ${CMAKE_SOURCE_DIR}/include)
+target_link_libraries(mcpp INTERFACE OpenSSL::SSL OpenSSL::Crypto ${LIBWEBSOCKETS_LIBRARY})
 
 # Example executables
 if(MCPP_BUILD_EXAMPLES)
@@ -164,9 +111,9 @@ if(MCPP_BUILD_TESTS)
     add_subdirectory(tests)
 endif()
 
-# Install
+# Install - header-only library, only install headers
 install(DIRECTORY include/mcpp DESTINATION include)
-install(TARGETS mcpp_static mcpp_shared
+install(TARGETS mcpp
     LIBRARY DESTINATION lib
     ARCHIVE DESTINATION lib
     RUNTIME DESTINATION bin

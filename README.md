@@ -4,6 +4,7 @@ A Modern C++ implementation of the Model Context Protocol (MCP), designed to be 
 
 ## Features
 
+- **100% Header-Only** - No compilation of core library needed, just include and use
 - **Full MCP Protocol Support** (version 2025-06-18)
 - **Multiple Transport Layers**:
   - **Stdio**: Local process communication via stdin/stdout
@@ -38,19 +39,13 @@ A Modern C++ implementation of the Model Context Protocol (MCP), designed to be 
 git clone https://github.com/laplaceliu/mcpp.git
 cd mcpp
 
-# Set up dependencies (this downloads and builds all required libraries)
-mkdir -p _deps && cd _deps
-cmake CMakeLists.txt
-make -j$(nproc)
-cd ..
-
 # Create build directory
 mkdir build && cd build
 
 # Configure with CMake
 cmake ..
 
-# Build
+# Build (header-only - only examples and tests need compilation)
 make -j$(nproc)
 
 # Run tests
@@ -87,7 +82,9 @@ mcpp/
 │   │   ├── request.hpp # Request routing
 │   │   └── response.hpp
 │   ├── transport/      # Transport layers
-│   │   ├── transport.hpp
+│   │   ├── itransport.hpp   # ITransport interface
+│   │   ├── factory.hpp      # TransportFactory
+│   │   ├── transport.hpp   # Backwards compatibility (includes factory.hpp)
 │   │   ├── stdio.hpp   # stdio transport
 │   │   ├── http.hpp    # HTTP/SSE transport
 │   │   └── websocket.hpp # WebSocket transport (libwebsockets)
@@ -104,10 +101,12 @@ mcpp/
 │       ├── circuit.hpp
 │       ├── metrics.hpp
 │       └── auth.hpp
-├── src/               # Source files
+├── src/               # (Empty - header-only library)
 ├── tests/             # Unit tests
 └── examples/          # Example applications
 ```
+
+**Note:** This is a **100% Header-Only** library. No source files need to be compiled for the core library. Simply include the headers and link to OpenSSL and libwebsockets.
 
 ## Usage
 
