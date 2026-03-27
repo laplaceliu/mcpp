@@ -13,6 +13,7 @@
 #include <vector>
 #include <functional>
 #include <mutex>
+#include <map>
 
 namespace mcpp {
 
@@ -20,10 +21,11 @@ namespace mcpp {
  * @brief WebSocket transport configuration
  */
 struct WebSocketConfig {
-    std::string host = "localhost";      ///< Server host
-    int port = 8080;                    ///< Server port
+    std::string host = "localhost";      ///< Server host (client) or bind address (server)
+    int port = 8080;                     ///< Server port
     std::string path = "/ws";            ///< WebSocket path
     bool use_ssl = false;                ///< Use WSS (TLS)
+    bool is_server = false;             ///< Run as server instead of client
     int connection_timeout_sec = 30;     ///< Connection timeout
     int ping_interval_sec = 30;          ///< Ping interval for keepalive
     int ping_timeout_sec = 10;           ///< Ping timeout
@@ -112,6 +114,11 @@ private:
     struct lws_context* ctx_ = nullptr;
     struct lws* wsi_ = nullptr;
     std::thread service_thread_;
+
+    // Server mode: track all connections
+    std::mutex clients_mutex_;
+    std::map<struct lws*, std::string> clients_;  // wsi -> client_id
+    int next_client_id_ = 0;
 
     void service_loop();
 

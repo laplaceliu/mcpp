@@ -9,6 +9,7 @@ set(TEST_SOURCES
     test_ratelimit.cpp
     test_circuit.cpp
     test_metrics.cpp
+    test_transport.cpp
 )
 
 # Create test executable

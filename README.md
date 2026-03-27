@@ -5,7 +5,10 @@ A Modern C++ implementation of the Model Context Protocol (MCP), designed to be 
 ## Features
 
 - **Full MCP Protocol Support** (version 2025-06-18)
-- **Multiple Transport Layers**: stdio and HTTP/SSE
+- **Multiple Transport Layers**:
+  - **Stdio**: Local process communication via stdin/stdout
+  - **HTTP/SSE**: Remote communication with Server-Sent Events
+  - **WebSocket**: Bidirectional real-time communication (client & server modes)
 - **Server Capabilities**: Tools, Resources, Prompts, Sampling, Elicitation, Logging
 - **Client Capabilities**: Full client-side MCP support
 - **Enterprise Features**:
@@ -19,8 +22,12 @@ A Modern C++ implementation of the Model Context Protocol (MCP), designed to be 
 
 - C++14 compatible compiler (GCC 7+, Clang 5+, MSVC 2019+)
 - CMake 3.10+
-- nlohmann/json 3.10.5
-- cpp-httplib 0.15.3 (header-only)
+- OpenSSL (libssl-dev on Ubuntu/Debian)
+- **Dependencies (managed via CMake FetchContent):**
+  - nlohmann/json 3.10.5
+  - cpp-httplib 0.15.3
+  - libwebsockets 4.3.4
+  - GoogleTest 1.14.0
 
 ## Installation
 
@@ -82,7 +89,8 @@ mcpp/
 │   ├── transport/      # Transport layers
 │   │   ├── transport.hpp
 │   │   ├── stdio.hpp   # stdio transport
-│   │   └── http.hpp    # HTTP/SSE transport
+│   │   ├── http.hpp    # HTTP/SSE transport
+│   │   └── websocket.hpp # WebSocket transport (libwebsockets)
 │   ├── server/         # Server implementation
 │   │   ├── server.hpp
 │   │   ├── tool.hpp
@@ -151,12 +159,41 @@ int main() {
         echo_tool
     );
 
-    // Start server with stdio transport
+    // Start server with stdio transport (default)
     server.start();
     server.wait();
 
     return 0;
 }
+```
+
+### Using Different Transports
+
+```cpp
+#include "mcpp/transport/transport.hpp"
+
+using namespace mcpp;
+
+// Create transport using factory
+auto transport = TransportFactory::create(TransportFactory::Type::Stdio);
+
+// Or by name
+auto http_transport = TransportFactory::create("http");
+auto ws_transport = TransportFactory::create("websocket");
+
+// Configure WebSocket transport
+WebSocketConfig ws_config;
+ws_config.host = "localhost";
+ws_config.port = 8080;
+ws_config.path = "/mcp";
+ws_config.is_server = false;  // Client mode
+ws_config.use_ssl = false;
+
+WebSocketTransport ws(ws_config);
+ws.on_message([](const std::string& msg) {
+    // Handle incoming message
+});
+ws.start();
 ```
 
 ### Creating a Client
@@ -295,7 +332,17 @@ ctest --output-on-failure
 
 # Run specific test suite
 ./build/bin/tests --gtest_filter="RateLimiterTest.*"
+
+# Run transport tests only
+./build/bin/tests --gtest_filter="*Transport*"
 ```
+
+**Test Coverage:** 109 tests across 14 test suites covering:
+- JSON parsing and serialization
+- JSON-RPC message protocol
+- Server primitives (Tools, Resources, Prompts)
+- Transport layers (Stdio, HTTP/SSE, WebSocket)
+- Enterprise features (Rate limiting, Circuit breaker, Metrics)
 
 ## API Reference
 
@@ -318,6 +365,21 @@ ctest --output-on-failure
 - `Client::on_elicitation_request(...)` - Set elicitation handler
 - `Client::on_progress_notification(...)` - Set progress handler
 - `Client::logging_message(...)` - Send logging message
+
+### Transport
+
+- `TransportFactory::create(Type)` - Create transport by type (Stdio/Http/WebSocket)
+- `TransportFactory::create(string)` - Create transport by name ("stdio"/"http"/"websocket")
+- `ITransport::start()` - Start transport
+- `ITransport::stop()` - Stop transport
+- `ITransport::send(message)` - Send message
+- `ITransport::on_message(handler)` - Set message handler
+- `ITransport::on_error(handler)` - Set error handler
+- `WebSocketTransport::WebSocketTransport(Config)` - Create with config
+- `WebSocketTransport::set_url(url)` - Set WebSocket URL
+- `WebSocketFramer::frame(message)` - Frame WebSocket message (RFC 6455)
+- `StdioFramer::frame/decode` - Frame/decode stdio messages
+- `HttpFramer::frame/frame_sse` - Frame HTTP messages/SSE events
 
 ### Enterprise
 
