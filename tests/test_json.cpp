@@ -1,5 +1,5 @@
 #include "gtest/gtest.h"
-#include "core/json.hpp"
+#include "mcpp/core/json.hpp"
 
 using namespace mcpp;
 
@@ -27,9 +27,9 @@ TEST(JsonTest, Dump) {
 
 TEST(JsonTest, ArrayAccess) {
     Json json = Json::array();
-    json.append(1);
-    json.append(2);
-    json.append(3);
+    json.push_back(1);
+    json.push_back(2);
+    json.push_back(3);
 
     EXPECT_EQ(json.size(), 3);
     EXPECT_EQ(json[0].get<int>(), 1);

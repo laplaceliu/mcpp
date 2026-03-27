@@ -48,7 +48,7 @@ void StdioTransport::read_loop() {
         char ch;
         if (std::cin.get(ch)) {
             if (ch == '\n') {
-                // 行结束，处理消息
+                // Line ending, process message
                 if (!buffer.empty() && message_handler_) {
                     try {
                         message_handler_(buffer);
@@ -63,7 +63,7 @@ void StdioTransport::read_loop() {
                 buffer.push_back(ch);
             }
         } else {
-            // 输入流结束
+            // Input stream ended
             break;
         }
     }
@@ -83,10 +83,10 @@ std::vector<std::string> StdioFramer::decode(const char* data, size_t len) {
 std::vector<std::string> StdioFramer::decode(const char* data, size_t len, std::string& remainder) {
     std::vector<std::string> messages;
 
-    // 将新数据追加到 remainder
+    // Append new data to remainder
     remainder.append(data, len);
 
-    // 查找换行符
+    // Find delimiter
     size_t pos;
     while ((pos = remainder.find(DELIMITER)) != std::string::npos) {
         std::string msg = remainder.substr(0, pos);

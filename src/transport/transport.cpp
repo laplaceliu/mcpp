@@ -5,6 +5,7 @@
 #include "mcpp/transport/transport.hpp"
 #include "mcpp/transport/stdio.hpp"
 #include "mcpp/transport/http.hpp"
+#include "mcpp/transport/websocket.hpp"
 #include <memory>
 
 namespace mcpp {
@@ -17,8 +18,7 @@ std::unique_ptr<ITransport> TransportFactory::create(Type type) {
             // Default HTTP transport on port 8080
             return std::unique_ptr<ITransport>(new HttpTransport(8080));
         case Type::WebSocket:
-            // Not yet implemented
-            return nullptr;
+            return std::unique_ptr<ITransport>(new WebSocketTransport());
         default:
             return nullptr;
     }
@@ -27,7 +27,7 @@ std::unique_ptr<ITransport> TransportFactory::create(Type type) {
 std::unique_ptr<ITransport> TransportFactory::create(const std::string& type) {
     if (type == "stdio") return create(Type::Stdio);
     if (type == "http" || type == "sse") return create(Type::Http);
-    if (type == "websocket" || type == "ws") return nullptr; // Not yet implemented
+    if (type == "websocket" || type == "ws") return create(Type::WebSocket);
     return nullptr;
 }
 

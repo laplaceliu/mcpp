@@ -1,5 +1,5 @@
 #include "gtest/gtest.h"
-#include "protocol/message.hpp"
+#include "mcpp/protocol/message.hpp"
 
 using namespace mcpp;
 

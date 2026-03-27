@@ -1,5 +1,5 @@
 #include "gtest/gtest.h"
-#include "server/server.hpp"
+#include "mcpp/server/server.hpp"
 
 using namespace mcpp;
 
@@ -28,7 +28,7 @@ TEST(ServerTest, RegisterTool) {
                 {"input", {{"type", "string"}}}
             }}
         }),
-        [&called](const JsonValue& args) {
+        [&called](const std::string&, const JsonValue&) {
             called = true;
             CallToolResult result;
             result.is_error = false;

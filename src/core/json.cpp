@@ -2,6 +2,8 @@
 
 namespace mcpp {
 
-// 便利函数实现
+/**
+ * @brief Convenience function implementations
+ */
 
 } // namespace mcpp

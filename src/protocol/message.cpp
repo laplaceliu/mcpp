@@ -14,14 +14,14 @@ const JsonRpcResponse* JsonRpcMessage::as_response() const {
 MessageType MessageParser::detect_type(const JsonValue& obj) {
     if (!obj.is_object()) return MessageType::Error;
 
-    // 检查是否是响应（有 result 或 error 字段）
+    // Check if it's a response (has result or error field)
     if (obj.contains("result") || obj.contains("error")) {
         return MessageType::Response;
     }
 
-    // 检查是否是请求（有 method 字段）
+    // Check if it's a request (has method field)
     if (obj.contains("method")) {
-        // 有 id 是请求，无 id 是通知
+        // Has id is request, no id is notification
         if (obj.contains("id")) {
             return MessageType::Request;
         } else {

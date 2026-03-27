@@ -3,7 +3,9 @@
 
 namespace mcpp {
 
-// 内部 HandlerWrapper 类
+/**
+ * @brief Internal HandlerWrapper class wrapping request handlers
+ */
 class HandlerWrapper : public IRequestHandler {
 public:
     HandlerWrapper(RequestHandler handler) : handler_(std::move(handler)) {}
