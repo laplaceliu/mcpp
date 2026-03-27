@@ -97,12 +97,21 @@ set(MCPP_CLIENT_SOURCES
     src/client/client.cpp
 )
 
+set(MCPP_ENTERPRISE_SOURCES
+    src/enterprise/middleware.cpp
+    src/enterprise/ratelimit.cpp
+    src/enterprise/circuit.cpp
+    src/enterprise/metrics.cpp
+    src/enterprise/auth.cpp
+)
+
 set(MCPP_ALL_SOURCES
     ${MCPP_CORE_SOURCES}
     ${MCPP_PROTOCOL_SOURCES}
     ${MCPP_TRANSPORT_SOURCES}
     ${MCPP_SERVER_SOURCES}
     ${MCPP_CLIENT_SOURCES}
+    ${MCPP_ENTERPRISE_SOURCES}
 )
 
 # 静态库
