@@ -53,6 +53,23 @@ set(BUILD_GMOCK ON)
 set(BUILD_GTEST ON)
 set(INSTALL_GTEST ON)
 
+# 4. libwebsockets (WebSocket library)
+FetchContent_Declare(
+    libwebsockets
+    GIT_REPOSITORY https://github.com/warmcat/libwebsockets.git
+    GIT_TAG v4.3.4
+    GIT_SHALLOW TRUE
+    SOURCE_DIR ${DEPS_DOWNLOAD_PREFIX}/libwebsockets-src
+    BINARY_DIR ${DEPS_PREFIX}/libwebsockets-build
+)
+set(LWS_WITH_CLIENT ON)
+set(LWS_WITH_SERVER ON)
+set(LWS_WITH_WSS ON)
+set(LWS_WITH_SSL ON)
+set(LWS_WITH_HTTP2 OFF)
+set(LWS_WERROR OFF)
+set(CMAKE_DISABLE_FINDING_PACKAGE_ZLIB ON)
+
 # Fetch and build dependencies in order
 message(STATUS "Fetching nlohmann/json...")
 FetchContent_MakeAvailable(nlohmann_json)
@@ -62,6 +79,9 @@ FetchContent_MakeAvailable(cpp-httplib)
 
 message(STATUS "Fetching GoogleTest...")
 FetchContent_MakeAvailable(googletest)
+
+message(STATUS "Fetching libwebsockets...")
+FetchContent_MakeAvailable(libwebsockets)
 
 # Install nlohmann/json to _deps/install
 message(STATUS "Installing nlohmann/json...")

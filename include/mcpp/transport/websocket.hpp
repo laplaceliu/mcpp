@@ -1,18 +1,18 @@
 /**
  * @file websocket.hpp
- * @brief WebSocket transport implementation using cpp-httplib
+ * @brief WebSocket transport implementation using libwebsockets
  */
 #pragma once
 
 #include "transport.hpp"
+#include <libwebsockets.h>
+
 #include <thread>
 #include <atomic>
 #include <string>
 #include <vector>
-#include <map>
 #include <functional>
 #include <mutex>
-#include <condition_variable>
 
 namespace mcpp {
 
@@ -21,17 +21,17 @@ namespace mcpp {
  */
 struct WebSocketConfig {
     std::string host = "localhost";      ///< Server host
-    int port = 8080;                      ///< Server port
-    std::string path = "/ws";             ///< WebSocket path
-    bool use_ssl = false;                 ///< Use WSS (TLS)
-    int connection_timeout_sec = 30;      ///< Connection timeout
+    int port = 8080;                    ///< Server port
+    std::string path = "/ws";            ///< WebSocket path
+    bool use_ssl = false;                ///< Use WSS (TLS)
+    int connection_timeout_sec = 30;     ///< Connection timeout
     int ping_interval_sec = 30;          ///< Ping interval for keepalive
-    int ping_timeout_sec = 10;            ///< Ping timeout
+    int ping_timeout_sec = 10;           ///< Ping timeout
 };
 
 /**
  * @brief WebSocket transport for bidirectional communication
- * @details Uses cpp-httplib for WebSocket implementation
+ * @details Provides WebSocket client transport for MCP using libwebsockets
  */
 class WebSocketTransport : public ITransport {
 public:
@@ -103,41 +103,61 @@ private:
     MessageHandler message_handler_;
     ErrorHandler error_handler_;
 
-    std::thread worker_thread_;
     std::mutex mutex_;
-    std::condition_variable cv_;
-
     std::vector<std::string> message_queue_;
-    std::atomic<bool> has_message_;
 
     bool use_ssl_ = false;
 
-    void worker_loop();
-    void process_messages();
-    bool connect_client();
-    void disconnect_client();
+    // libwebsockets context and connection
+    struct lws_context* ctx_ = nullptr;
+    struct lws* wsi_ = nullptr;
+    std::thread service_thread_;
+
+    void service_loop();
+
+    friend int websocket_callback(struct lws* wsi, enum lws_callback_reasons reason,
+                                 void* user, void* in, size_t len);
 };
 
+// External callback for libwebsockets
+int websocket_callback(struct lws* wsi, enum lws_callback_reasons reason,
+                      void* user, void* in, size_t len);
+
 /**
- * @brief WebSocket message framing
+ * @brief WebSocket message framing utilities
  * @details MCP over WebSocket uses JSON messages with UTF-8 encoding
+ *
+ * Implements RFC 6455 WebSocket framing format
  */
 class WebSocketFramer {
 public:
     /**
-     * @brief Frame a message for transmission
-     * @param message Raw JSON message
-     * @return The same message (WebSocket handles framing)
+     * @brief Frame a WebSocket text message
+     * @param message Raw JSON message payload
+     * @return Complete WebSocket frame ready for transmission
      */
     static std::string frame(const std::string& message);
 
     /**
-     * @brief Check if message is complete
-     * @param data Input data
+     * @brief Check if a WebSocket frame is complete
+     * @param data Input data buffer
      * @param len Length of input data
-     * @return true if message is complete
+     * @return true if the frame is complete and can be processed
      */
     static bool is_complete(const char* data, size_t len);
+
+    /**
+     * @brief Unmask WebSocket payload data
+     * @param masked_data Input masked data
+     * @param masked_len Length of masked data
+     * @param unmasked_data Output buffer for unmasked data
+     * @param unmasked_len Length of unmasked buffer
+     * @param mask_key 4-byte masking key
+     * @return true if successful
+     */
+    static bool unmask_payload(const char* masked_data, size_t masked_len,
+                               char* unmasked_data, size_t unmasked_len,
+                               const char* mask_key);
 };
 
 } // namespace mcpp

@@ -1,65 +1,46 @@
 /**
  * @file websocket.cpp
- * @brief WebSocket transport implementation
- * @note WebSocket client functionality requires OpenSSL support in cpp-httplib
+ * @brief WebSocket transport implementation using libwebsockets
  */
 
 #include "mcpp/transport/websocket.hpp"
-#include <iostream>
-#include <sstream>
-#include <iomanip>
+#include "mcpp/core/error.hpp"
+
+#include <cstring>
 #include <random>
-#include <chrono>
-
-// Base64 encoding for WebSocket handshake
-static const char BASE64_ALPHABET[] =
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
-static std::string base64_encode(const std::vector<uint8_t>& data) {
-    std::string result;
-    int i = 0;
-    int j = 0;
-
-    while (i < static_cast<int>(data.size())) {
-        int b1 = i < static_cast<int>(data.size()) ? data[i++] : 0;
-        int b2 = i < static_cast<int>(data.size()) ? data[i++] : 0;
-        int b3 = i < static_cast<int>(data.size()) ? data[i++] : 0;
-
-        result += BASE64_ALPHABET[b1 >> 2];
-        result += BASE64_ALPHABET[((b1 & 0x03) << 4) | (b2 >> 4)];
-        result += (i - 1 < static_cast<int>(data.size())) ? BASE64_ALPHABET[((b2 & 0x0F) << 2) | (b3 >> 6)] : '=';
-        result += (i < static_cast<int>(data.size())) ? BASE64_ALPHABET[b3 & 0x3F] : '=';
-    }
-
-    return result;
-}
-
-static std::string compute_accept_key(const std::string& key) {
-    // WebSocket handshake requires "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
-    static const std::string MAGIC = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
-    std::string combined = key + MAGIC;
-
-    // SHA-1 hash (simplified - just return a placeholder for non-OpenSSL builds)
-    // In production, use OpenSSL or similar for proper SHA-1
-    std::vector<uint8_t> hash(20);
-    for (size_t i = 0; i < combined.size() && i < 20; i++) {
-        hash[i] = static_cast<uint8_t>(combined[i]);
-    }
-
-    return base64_encode(hash);
-}
 
 namespace mcpp {
+
+// Per-session data structure
+struct PerSessionData {
+    WebSocketTransport* transport;
+};
+
+// libwebsockets protocol definition
+static struct lws_protocols protocols[] = {
+    {
+        "mcp",
+        websocket_callback,
+        sizeof(void*),
+        4096,
+    },
+    { nullptr, nullptr, 0, 0 }
+};
+
+// ============ WebSocketTransport ============
 
 WebSocketTransport::WebSocketTransport(const WebSocketConfig& config)
     : config_(config),
       connected_(false),
       running_(false),
-      has_message_(false),
-      use_ssl_(false) {
+      use_ssl_(false),
+      ctx_(nullptr),
+      wsi_(nullptr) {
     // Build URL from config
     std::string scheme = config_.use_ssl ? "wss" : "ws";
-    url_ = scheme + "://" + config_.host + ":" + std::to_string(config_.port) + config_.path;
+    url_ = scheme + "://" + config_.host + ":" +
+           std::to_string(config_.port) + config_.path;
+    use_ssl_ = config_.use_ssl;
 }
 
 WebSocketTransport::~WebSocketTransport() {
@@ -68,39 +49,106 @@ WebSocketTransport::~WebSocketTransport() {
 
 void WebSocketTransport::set_url(const std::string& url) {
     url_ = url;
+    use_ssl_ = false;
 
     // Parse URL to update config
-    if (url_.size() >= 6 && url_.substr(0, 6) == "wss://") {
+    std::string parsed_url = url;
+    if (parsed_url.size() >= 6 && parsed_url.substr(0, 6) == "wss://") {
         use_ssl_ = true;
-        url_ = url_.substr(6);
-    } else if (url_.size() >= 5 && url_.substr(0, 5) == "ws://") {
+        parsed_url = parsed_url.substr(6);
+    } else if (parsed_url.size() >= 5 && parsed_url.substr(0, 5) == "ws://") {
         use_ssl_ = false;
-        url_ = url_.substr(5);
+        parsed_url = parsed_url.substr(5);
     }
 
-    // Extract host, port, path from url_
-    auto colon_pos = url_.find(':');
-    auto slash_pos = url_.find('/');
+    // Extract host, port, path from parsed_url
+    auto colon_pos = parsed_url.find(':');
+    auto slash_pos = parsed_url.find('/');
 
     if (colon_pos != std::string::npos) {
-        config_.host = url_.substr(0, colon_pos);
+        config_.host = parsed_url.substr(0, colon_pos);
         if (slash_pos != std::string::npos) {
-            auto port_str = url_.substr(colon_pos + 1, slash_pos - colon_pos - 1);
+            auto port_str = parsed_url.substr(colon_pos + 1, slash_pos - colon_pos - 1);
             config_.port = std::stoi(port_str);
-            config_.path = url_.substr(slash_pos);
+            config_.path = parsed_url.substr(slash_pos);
         } else {
-            config_.port = std::stoi(url_.substr(colon_pos + 1));
+            config_.port = std::stoi(parsed_url.substr(colon_pos + 1));
             config_.path = "/";
         }
     } else if (slash_pos != std::string::npos) {
-        config_.host = url_.substr(0, slash_pos);
-        config_.path = url_.substr(slash_pos);
-        config_.port = config_.use_ssl ? 443 : 80;
+        config_.host = parsed_url.substr(0, slash_pos);
+        config_.path = parsed_url.substr(slash_pos);
+        config_.port = use_ssl_ ? 443 : 80;
     } else {
-        config_.host = url_;
+        config_.host = parsed_url;
         config_.path = "/";
-        config_.port = config_.use_ssl ? 443 : 80;
+        config_.port = use_ssl_ ? 443 : 80;
     }
+}
+
+int websocket_callback(struct lws* wsi, enum lws_callback_reasons reason,
+                      void* user, void* in, size_t len) {
+    (void)len;
+
+    // Get per-session data
+    auto* pss = (PerSessionData*)user;
+    WebSocketTransport* transport = pss ? pss->transport : nullptr;
+
+    switch (reason) {
+        case LWS_CALLBACK_CLIENT_ESTABLISHED:
+            if (transport) {
+                transport->connected_ = true;
+            }
+            break;
+
+        case LWS_CALLBACK_CLIENT_RECEIVE:
+            if (transport && transport->message_handler_ && in) {
+                std::string msg(static_cast<char*>(in), len);
+                transport->message_handler_(msg);
+            }
+            break;
+
+        case LWS_CALLBACK_CLIENT_WRITEABLE:
+            if (transport) {
+                std::lock_guard<std::mutex> lock(transport->mutex_);
+                if (!transport->message_queue_.empty()) {
+                    const auto& msg = transport->message_queue_.front();
+
+                    unsigned char buf[LWS_PRE + 4096];
+                    unsigned char* p = &buf[LWS_PRE];
+
+                    size_t n = msg.size();
+                    if (n > sizeof(buf) - LWS_PRE) {
+                        n = sizeof(buf) - LWS_PRE;
+                    }
+
+                    memcpy(p, msg.data(), n);
+
+                    int written = lws_write(wsi, p, n, LWS_WRITE_TEXT);
+                    if (written >= 0) {
+                        transport->message_queue_.erase(transport->message_queue_.begin());
+                    }
+                }
+            }
+            break;
+
+        case LWS_CALLBACK_CLIENT_CLOSED:
+        case LWS_CALLBACK_CLOSED:
+        case LWS_CALLBACK_WSI_DESTROY:
+            if (transport) {
+                transport->connected_ = false;
+                transport->running_ = false;
+            }
+            break;
+
+        case LWS_CALLBACK_CONNECTING:
+            break;
+
+        default:
+            break;
+    }
+
+    return 0;
 }
 
 bool WebSocketTransport::start() {
@@ -109,7 +157,65 @@ bool WebSocketTransport::start() {
     }
 
     running_ = true;
-    worker_thread_ = std::thread(&WebSocketTransport::worker_loop, this);
+    connected_ = false;
+
+    // Create lws context
+    struct lws_context_creation_info info;
+    memset(&info, 0, sizeof(info));
+
+    info.port = CONTEXT_PORT_NO_LISTEN;
+    info.protocols = protocols;
+    info.gid = -1;
+    info.uid = -1;
+    info.options = LWS_SERVER_OPTION_DO_SSL_GLOBAL_INIT;
+
+    ctx_ = lws_create_context(&info);
+    if (!ctx_) {
+        if (error_handler_) {
+            error_handler_("Failed to create libwebsockets context");
+        }
+        running_ = false;
+        return false;
+    }
+
+    // Connect to WebSocket
+    struct lws_client_connect_info ccinfo;
+    memset(&ccinfo, 0, sizeof(ccinfo));
+
+    ccinfo.context = ctx_;
+    ccinfo.address = config_.host.c_str();
+    ccinfo.port = config_.port;
+    ccinfo.path = config_.path.c_str();
+    ccinfo.host = ccinfo.address;
+    ccinfo.origin = ccinfo.address;
+    ccinfo.protocol = "mcp";
+    ccinfo.pwsi = &wsi_;
+
+    if (use_ssl_) {
+        ccinfo.ssl_connection = LCCSCF_USE_SSL | LCCSCF_ALLOW_INSECURE;
+    } else {
+        ccinfo.ssl_connection = 0;
+    }
+
+    wsi_ = lws_client_connect_via_info(&ccinfo);
+    if (!wsi_) {
+        if (error_handler_) {
+            error_handler_("Failed to connect to " + url_);
+        }
+        lws_context_destroy(ctx_);
+        ctx_ = nullptr;
+        running_ = false;
+        return false;
+    }
+
+    // Set user data to point back to transport
+    auto* pss = (PerSessionData*)lws_wsi_user(wsi_);
+    if (pss) {
+        pss->transport = this;
+    }
+
+    // Start service thread
+    service_thread_ = std::thread(&WebSocketTransport::service_loop, this);
 
     return true;
 }
@@ -121,22 +227,32 @@ void WebSocketTransport::stop() {
 
     running_ = false;
 
-    disconnect_client();
-
-    if (worker_thread_.joinable()) {
-        worker_thread_.join();
+    if (service_thread_.joinable()) {
+        service_thread_.join();
     }
+
+    if (ctx_) {
+        lws_context_destroy(ctx_);
+        ctx_ = nullptr;
+    }
+
+    wsi_ = nullptr;
+    connected_ = false;
 }
 
 bool WebSocketTransport::send(const std::string& message) {
+    std::lock_guard<std::mutex> lock(mutex_);
+
     if (!connected_) {
         return false;
     }
 
-    std::lock_guard<std::mutex> lock(mutex_);
     message_queue_.push_back(message);
-    has_message_ = true;
-    cv_.notify_one();
+
+    // Request callback to send
+    if (wsi_) {
+        lws_callback_on_writable(wsi_);
+    }
 
     return true;
 }
@@ -153,79 +269,57 @@ bool WebSocketTransport::is_connected() const {
     return connected_;
 }
 
-void WebSocketTransport::worker_loop() {
-    while (running_) {
-        if (!connected_) {
-            if (!connect_client()) {
-                std::this_thread::sleep_for(std::chrono::seconds(1));
-                continue;
-            }
+void WebSocketTransport::service_loop() {
+    while (running_ && ctx_) {
+        // Service libwebsockets
+        int n = lws_service(ctx_, 50);
+        if (n < 0) {
+            break;
         }
-
-        process_messages();
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
-}
-
-void WebSocketTransport::process_messages() {
-    // Messages are sent via send() and queued
-    // The actual sending happens in the main loop or callback
-}
-
-bool WebSocketTransport::connect_client() {
-    /**
-     * @note WebSocket client requires OpenSSL support in cpp-httplib
-     * Since MCPP builds with HTTPLIB_REQUIRE_OPENSSL=OFF, the WebSocket
-     * client functionality is limited.
-     *
-     * For full WebSocket client support:
-     * 1. Enable OpenSSL in the build
-     * 2. Use httplib::SSLClient instead of regular Client
-     * 3. Or integrate a dedicated WebSocket library
-     *
-     * The server-side WebSocket handling is provided via HttpTransport
-     * when it detects a WebSocket upgrade request.
-     */
-
-    // For now, mark as connected in server mode
-    // In a full implementation, this would establish a TCP connection
-    // and perform the WebSocket handshake
-
-    connected_ = true;
-    return true;
-}
-
-void WebSocketTransport::disconnect_client() {
-    connected_ = false;
 }
 
 // ============ WebSocketFramer ============
 
 std::string WebSocketFramer::frame(const std::string& message) {
-    // WebSocket text frame format:
-    // byte 0: 0x81 (FIN + text frame)
-    // byte 1: payload length (128 + len for >125 bytes)
-    // bytes 2+: payload
-
     std::string frame;
-    uint8_t first_byte = 0x81; // FIN + text frame
-    frame += static_cast<char>(first_byte);
+    frame.reserve(message.size() + 10);
+
+    // Byte 0: FIN + text opcode (0x81)
+    frame += static_cast<char>(0x81);
+
+    // Byte 1: Mask bit + payload length
+    uint8_t mask_bit = 0x80;  // Set mask bit for client sending
 
     if (message.size() <= 125) {
-        frame += static_cast<char>(message.size());
+        frame += static_cast<char>(mask_bit | message.size());
     } else if (message.size() <= 65535) {
-        frame += static_cast<char>(126);
+        frame += static_cast<char>(mask_bit | 126);
         frame += static_cast<char>((message.size() >> 8) & 0xFF);
         frame += static_cast<char>(message.size() & 0xFF);
     } else {
-        frame += static_cast<char>(127);
-        // 8-byte length
+        frame += static_cast<char>(mask_bit | 127);
         for (int i = 7; i >= 0; i--) {
             frame += static_cast<char>((message.size() >> (i * 8)) & 0xFF);
         }
     }
 
-    frame += message;
+    // Generate and append masking key
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_int_distribution<> dis(0, 255);
+
+    char mask_key[4];
+    for (int i = 0; i < 4; i++) {
+        mask_key[i] = static_cast<char>(dis(gen));
+        frame += mask_key[i];
+    }
+
+    // Append masked payload
+    for (size_t i = 0; i < message.size(); i++) {
+        frame += message[i] ^ mask_key[i % 4];
+    }
+
     return frame;
 }
 
@@ -234,45 +328,47 @@ bool WebSocketFramer::is_complete(const char* data, size_t len) {
         return false;
     }
 
-    uint8_t opcode = data[0] & 0x0F;
-    bool masked = (data[1] & 0x80) != 0;
-    uint64_t payload_len = data[1] & 0x7F;
+    uint8_t first_byte = static_cast<uint8_t>(data[0]);
+    uint8_t opcode = first_byte & 0x0F;
+
+    uint64_t payload_len = static_cast<uint8_t>(data[1]) & 0x7F;
+    bool masked = (static_cast<uint8_t>(data[1]) & 0x80) != 0;
 
     size_t header_len = 2;
-    if (payload_len == 126) {
-        header_len += 2;
-    } else if (payload_len == 127) {
-        header_len += 8;
-    }
-    if (masked) {
-        header_len += 4;
-    }
 
-    if (len < header_len) {
-        return false;
-    }
-
-    uint64_t offset = 0;
     if (payload_len == 126) {
+        if (len < 4) return false;
         payload_len = (static_cast<uint8_t>(data[2]) << 8) |
                       static_cast<uint8_t>(data[3]);
-        offset = 4;
+        header_len += 2;
     } else if (payload_len == 127) {
+        if (len < 10) return false;
         payload_len = 0;
         for (int i = 0; i < 8; i++) {
             payload_len = (payload_len << 8) | static_cast<uint8_t>(data[2 + i]);
         }
-        offset = 10;
+        header_len += 8;
     }
-
-    size_t mask_offset = header_len;
-    size_t payload_offset = header_len;
 
     if (masked) {
-        payload_offset += 4;
+        header_len += 4;
     }
 
-    return len >= (payload_offset + payload_len);
+    return len >= (header_len + payload_len);
+}
+
+bool WebSocketFramer::unmask_payload(const char* masked_data, size_t masked_len,
+                                      char* unmasked_data, size_t unmasked_len,
+                                      const char* mask_key) {
+    if (unmasked_len != masked_len) {
+        return false;
+    }
+
+    for (size_t i = 0; i < masked_len; i++) {
+        unmasked_data[i] = masked_data[i] ^ mask_key[i % 4];
+    }
+
+    return true;
 }
 
 } // namespace mcpp

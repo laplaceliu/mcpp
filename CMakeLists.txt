@@ -20,8 +20,11 @@ set(DEPS_PREFIX ${CMAKE_SOURCE_DIR}/_deps)
 set(DEPS_INSTALL_PREFIX ${DEPS_PREFIX}/install)
 set(DEPS_SRC_PREFIX ${DEPS_PREFIX}/src)
 
-# Find nlohmann/json
-find_package(nlohmann_json 3.10 REQUIRED PATHS ${DEPS_INSTALL_PREFIX})
+# nlohmann/json (header-only library - use source directly)
+set(NLOHMANN_JSON_INCLUDE_DIR ${DEPS_SRC_PREFIX}/nlohmann_json-src/single_include)
+if(NOT EXISTS ${NLOHMANN_JSON_INCLUDE_DIR}/nlohmann/json.hpp)
+    message(FATAL_ERROR "nlohmann/json not found at ${NLOHMANN_JSON_INCLUDE_DIR}")
+endif()
 
 # cpp-httplib (header-only library)
 set(HTTPLIB_INCLUDE_DIR ${DEPS_SRC_PREFIX}/cpp-httplib-src)
@@ -31,6 +34,17 @@ endif()
 
 # OpenSSL (required for WebSocket)
 find_package(OpenSSL REQUIRED)
+
+# libwebsockets (WebSocket library)
+set(LIBWEBSOCKETS_INCLUDE_DIR ${DEPS_SRC_PREFIX}/libwebsockets-src/include)
+set(LIBWEBSOCKETS_BUILD_DIR ${DEPS_PREFIX}/libwebsockets-build/include)
+if(NOT EXISTS ${LIBWEBSOCKETS_INCLUDE_DIR}/libwebsockets.h)
+    message(FATAL_ERROR "libwebsockets not found at ${LIBWEBSOCKETS_INCLUDE_DIR}")
+endif()
+set(LIBWEBSOCKETS_LIBRARY ${DEPS_PREFIX}/libwebsockets-build/lib/libwebsockets.so)
+if(NOT EXISTS ${LIBWEBSOCKETS_LIBRARY})
+    message(FATAL_ERROR "libwebsockets library not found at ${LIBWEBSOCKETS_LIBRARY}")
+endif()
 
 # GoogleTest - pre-built libraries
 set(GTEST_ROOT ${DEPS_PREFIX})
@@ -67,8 +81,10 @@ set_target_properties(GTest::gmock_main PROPERTIES
 # Include directories
 include_directories(
     ${CMAKE_SOURCE_DIR}/include
-    ${DEPS_INSTALL_PREFIX}/include
+    ${NLOHMANN_JSON_INCLUDE_DIR}
     ${HTTPLIB_INCLUDE_DIR}
+    ${LIBWEBSOCKETS_INCLUDE_DIR}
+    ${LIBWEBSOCKETS_BUILD_DIR}
 )
 
 # Source files
@@ -121,12 +137,14 @@ set(MCPP_ALL_SOURCES
 # Static library
 add_library(mcpp_static STATIC ${MCPP_ALL_SOURCES})
 target_compile_definitions(mcpp_static PUBLIC MCPP_STATIC)
+target_link_libraries(mcpp_static OpenSSL::SSL OpenSSL::Crypto ${LIBWEBSOCKETS_LIBRARY})
 set_target_properties(mcpp_static PROPERTIES OUTPUT_NAME mcpp)
 
 # Shared library
 add_library(mcpp_shared SHARED ${MCPP_ALL_SOURCES})
 set_target_properties(mcpp_shared PROPERTIES OUTPUT_NAME mcpp)
 target_compile_definitions(mcpp_shared PUBLIC MCPP_EXPORTS)
+target_link_libraries(mcpp_shared OpenSSL::SSL OpenSSL::Crypto ${LIBWEBSOCKETS_LIBRARY})
 
 # Main library
 add_library(mcpp ALIAS mcpp_static)
