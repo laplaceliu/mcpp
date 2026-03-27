@@ -14,7 +14,8 @@ std::unique_ptr<ITransport> TransportFactory::create(Type type) {
         case Type::Stdio:
             return std::unique_ptr<ITransport>(new StdioTransport());
         case Type::Http:
-            return std::unique_ptr<ITransport>(new HttpTransport());
+            // Default HTTP transport on port 8080
+            return std::unique_ptr<ITransport>(new HttpTransport(8080));
         case Type::WebSocket:
             // Not yet implemented
             return nullptr;

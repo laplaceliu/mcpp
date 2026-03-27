@@ -93,11 +93,16 @@ set(MCPP_SERVER_SOURCES
     src/server/prompt.cpp
 )
 
+set(MCPP_CLIENT_SOURCES
+    src/client/client.cpp
+)
+
 set(MCPP_ALL_SOURCES
     ${MCPP_CORE_SOURCES}
     ${MCPP_PROTOCOL_SOURCES}
     ${MCPP_TRANSPORT_SOURCES}
     ${MCPP_SERVER_SOURCES}
+    ${MCPP_CLIENT_SOURCES}
 )
 
 # 静态库
@@ -117,6 +122,9 @@ add_library(mcpp ALIAS mcpp_static)
 if(MCPP_BUILD_EXAMPLES)
     add_executable(example_stdio_server examples/stdio_server.cpp)
     target_link_libraries(example_stdio_server mcpp)
+
+    add_executable(example_client examples/client_example.cpp)
+    target_link_libraries(example_client mcpp)
 endif()
 
 # 测试
