@@ -1,6 +1,6 @@
 /**
  * @file stdio_server.cpp
- * @brief Comprehensive example MCP server showcasing library features
+ * @brief Comprehensive MCP stdio server showcasing library features
  *
  * This server demonstrates:
  * - Tools: echo, calculator, file operations, image generation
@@ -9,7 +9,12 @@
  * - Notifications: tools/resources changed notifications
  * - Logging: server-side logging messages
  * - Error handling: proper error responses
- * - Sampling: server requesting LLM completions from client
+ *
+ * Architecture based on gopher-mcp reference implementation:
+ * - Uses poll() for efficient stdin reading with timeout
+ * - Main loop with isRunning() check
+ * - Signal handling for graceful shutdown
+ * - ALL logs to stderr, stdout reserved for JSON-RPC only
  */
 
 #include "mcpp/server/server.hpp"
@@ -21,8 +26,25 @@
 #include <iomanip>
 #include <ctime>
 #include <random>
+#include <signal.h>
+#include <thread>
+
+// IMPORTANT: For MCP stdio servers, ALL logs must go to stderr, not stdout
+// stdout is reserved exclusively for JSON-RPC messages
+#define LOG(msg) std::cerr << msg << std::endl
 
 using namespace mcpp;
+
+// Global server for signal handling
+std::shared_ptr<Server> g_server;
+
+void signal_handler(int signal) {
+    if (signal == SIGINT || signal == SIGTERM) {
+        if (g_server) {
+            g_server->stop();
+        }
+    }
+}
 
 // ============================================================================
 // Tool Implementations
@@ -141,10 +163,9 @@ CallToolResult random_tool(const std::string& name, const JsonValue& args) {
     std::uniform_int_distribution<> dis(min_val, max_val);
 
     std::ostringstream oss;
-    oss << "Random numbers [" << min_val << ", " << max_val << "]:\n";
+    oss << "Random numbers [" << min_val << ", " << max_val << "]:";
     for (int i = 0; i < count; ++i) {
-        oss << "  " << dis(gen);
-        if (i < count - 1) oss << "\n";
+        oss << "\n  " << dis(gen);
     }
 
     result.content.push_back(JsonValue::object({
@@ -231,19 +252,16 @@ CallToolResult analyze_tool(const std::string& name, const JsonValue& args) {
                 in_word = false;
             }
         }
-        if (!text.empty() && !std::isspace(text.back())) {
-            // Last char is part of word
-        }
 
         oss << "Text Statistics:\n";
         oss << "  Characters: " << char_count << "\n";
         oss << "  Words: " << word_count << "\n";
-        oss << "  Lines: " << line_count + 1 << "\n";
+        oss << "  Lines: " << (line_count + 1) << "\n";
         oss << "  Vowels: " << vowel_count << "\n";
         oss << "  Consonants: " << consonant_count << "\n";
         oss << "  Digits: " << digit_count << "\n";
         oss << "  Spaces: " << space_count << "\n";
-        oss << "  Average word length: " << (word_count > 0 ? char_count / static_cast<double>(word_count) : 0) << "\n";
+        oss << "  Average word length: " << (word_count > 0 ? char_count / static_cast<double>(word_count) : 0);
     }
 
     if (include_words && !text.empty()) {
@@ -262,7 +280,7 @@ CallToolResult analyze_tool(const std::string& name, const JsonValue& args) {
         }
 
         if (!word_freq.empty()) {
-            if (include_stats) oss << "\n";
+            if (include_stats) oss << "\n\n";
             oss << "Top 10 Words:\n";
             std::vector<std::pair<std::string, int>> sorted_words(word_freq.begin(), word_freq.end());
             std::sort(sorted_words.begin(), sorted_words.end(),
@@ -307,32 +325,32 @@ CallToolResult json_tool(const std::string& name, const JsonValue& args) {
             oss << "Valid JSON\n";
             oss << "Type: " << parsed.type_name() << "\n";
             if (parsed.is_object()) {
-                oss << "Keys: " << parsed.size() << "\n";
+                oss << "Keys: " << parsed.size();
             } else if (parsed.is_array()) {
-                oss << "Elements: " << parsed.size() << "\n";
+                oss << "Elements: " << parsed.size();
             }
         } catch (const std::exception& e) {
             result.is_error = true;
             result.error = e.what();
-            oss << "Invalid JSON: " << e.what() << "\n";
+            oss << "Invalid JSON: " << e.what();
         }
     } else if (operation == "prettify") {
         try {
             JsonValue parsed = JsonValue::parse(json_str);
-            oss << parsed.dump(2) << "\n";
+            oss << parsed.dump(2);
         } catch (const std::exception& e) {
             result.is_error = true;
             result.error = e.what();
-            oss << "Error: " << e.what() << "\n";
+            oss << "Error: " << e.what();
         }
     } else if (operation == "minify") {
         try {
             JsonValue parsed = JsonValue::parse(json_str);
-            oss << parsed.dump() << "\n";
+            oss << parsed.dump();
         } catch (const std::exception& e) {
             result.is_error = true;
             result.error = e.what();
-            oss << "Error: " << e.what() << "\n";
+            oss << "Error: " << e.what();
         }
     } else if (operation == "keys") {
         try {
@@ -343,17 +361,17 @@ CallToolResult json_tool(const std::string& name, const JsonValue& args) {
                     oss << "  " << el.key() << "\n";
                 }
             } else {
-                oss << "Not an object\n";
+                oss << "Not an object";
             }
         } catch (const std::exception& e) {
             result.is_error = true;
             result.error = e.what();
-            oss << "Error: " << e.what() << "\n";
+            oss << "Error: " << e.what();
         }
     } else {
         result.is_error = true;
         result.error = "Unknown operation: " + operation;
-        oss << "Error: Unknown operation '" << operation << "'\n";
+        oss << "Error: Unknown operation '" << operation << "'";
     }
 
     result.content.push_back(JsonValue::object({
@@ -378,21 +396,12 @@ CallToolResult image_tool(const std::string& name, const JsonValue& args) {
     oss << "Image Generation Request\n";
     oss << "Prompt: " << prompt << "\n";
     oss << "Size: " << size << "\n";
-    oss << "Status: simulated (actual implementation would call image generation API)\n";
+    oss << "Status: simulated (actual implementation would call image generation API)";
 
-    // In a real implementation, this would call an image generation API
-    // For now, we return a placeholder response
     result.content.push_back(JsonValue::object({
         {"type", "text"},
         {"text", oss.str()}
     }));
-
-    // Could also return an image resource:
-    // result.content.push_back(JsonValue::object({
-    //     {"type", "image"},
-    //     {"data", "base64_encoded_image_data"},
-    //     {"mimeType", "image/png"}
-    // }));
 
     return result;
 }
@@ -428,25 +437,21 @@ JsonValue get_config_resource() {
 JsonValue get_system_resource() {
     JsonValue system = JsonValue::object();
 
-    // OS info (simplified)
     system["os"] = "Linux";
     system["arch"] = "x86_64";
 
-    // Current time
     std::time_t now = std::time(nullptr);
     std::ostringstream oss;
     oss << std::put_time(std::localtime(&now), "%Y-%m-%d %H:%M:%S %z");
     system["timestamp"] = oss.str();
-    system["uptime_seconds"] = 0;  // Would be actual uptime in real impl
+    system["uptime_seconds"] = 0;
 
-    // Memory info (simulated)
     system["memory"] = JsonValue::object({
         {"total_mb", 16384},
         {"available_mb", 8192},
         {"used_percent", 50.0}
     });
 
-    // CPU info (simulated)
     system["cpu"] = JsonValue::object({
         {"cores", 8},
         {"usage_percent", 25.0}
@@ -464,7 +469,6 @@ JsonValue read_resource(const std::string& uri) {
     } else if (uri == "system://info") {
         return get_system_resource();
     } else if (uri.find("user://") == 0) {
-        // Template: user://{user_id}/profile
         std::string user_id = uri.substr(7);
         JsonValue user = JsonValue::object();
         user["id"] = user_id;
@@ -474,7 +478,6 @@ JsonValue read_resource(const std::string& uri) {
         return user;
     }
 
-    // Default - return error info
     JsonValue error = JsonValue::object();
     error["error"] = "Unknown resource";
     error["uri"] = uri;
@@ -776,7 +779,6 @@ void register_tools(const std::shared_ptr<Server>& server) {
  * @brief Register all resources with the server
  */
 void register_resources(const std::shared_ptr<Server>& server) {
-    // Static configuration resource
     server->register_resource(
         "config://server",
         "Server Configuration",
@@ -785,7 +787,6 @@ void register_resources(const std::shared_ptr<Server>& server) {
         get_config_resource
     );
 
-    // Dynamic system information resource
     server->register_resource(
         "system://info",
         "System Information",
@@ -794,7 +795,6 @@ void register_resources(const std::shared_ptr<Server>& server) {
         get_system_resource
     );
 
-    // Resource template for user profiles
     server->register_resource_template(
         "user://{user_id}/profile",
         "User Profile",
@@ -807,7 +807,6 @@ void register_resources(const std::shared_ptr<Server>& server) {
  * @brief Register all prompts with the server
  */
 void register_prompts(const std::shared_ptr<Server>& server) {
-    // Code review prompt
     server->register_prompt(
         "code_review",
         "Generate a code review for provided code",
@@ -816,7 +815,6 @@ void register_prompts(const std::shared_ptr<Server>& server) {
         }
     );
 
-    // Documentation generation prompt
     server->register_prompt(
         "generate_docs",
         "Generate documentation for code or API",
@@ -825,7 +823,6 @@ void register_prompts(const std::shared_ptr<Server>& server) {
         }
     );
 
-    // Test generation prompt
     server->register_prompt(
         "generate_tests",
         "Generate unit tests for code",
@@ -839,15 +836,17 @@ void register_prompts(const std::shared_ptr<Server>& server) {
 // Main
 // ============================================================================
 
-int main() {
-    std::cout << "===============================================\n"
-              << "   Comprehensive MCP Server Example\n"
-              << "===============================================\n"
-              << std::endl;
+int main(int argc, char* argv[]) {
+    // Setup signal handlers
+    signal(SIGINT, signal_handler);
+    signal(SIGTERM, signal_handler);
+#ifndef _WIN32
+    signal(SIGPIPE, SIG_IGN);
+#endif
 
     // Create server options
     ServerOptions options;
-    options.name = "comprehensive-server";
+    options.name = "comprehensive-mcp-server";
     options.version = "1.0.0";
     options.protocol_version = "2025-06-18";
 
@@ -861,43 +860,23 @@ int main() {
     options.transport_type = TransportFactory::Type::Stdio;
 
     // Create server
-    auto server = std::make_shared<Server>(options);
+    g_server = std::make_shared<Server>(options);
 
     // Register all features
-    std::cout << "Registering tools...\n";
-    register_tools(server);
-
-    std::cout << "Registering resources...\n";
-    register_resources(server);
-
-    std::cout << "Registering prompts...\n";
-    register_prompts(server);
-
-    // Log server startup
-    std::cout << "\n===============================================\n"
-              << "   Server Capabilities:\n"
-              << "   - Tools: echo, calculator, random, time,\n"
-              << "            analyze, json, generate_image\n"
-              << "   - Resources: config://, system://, user://\n"
-              << "   - Prompts: code_review, generate_docs,\n"
-              << "              generate_tests\n"
-              << "===============================================\n"
-              << std::endl;
+    register_tools(g_server);
+    register_resources(g_server);
+    register_prompts(g_server);
 
     // Start server
-    std::cout << "Starting server...\n" << std::endl;
-    if (!server->start()) {
-        std::cerr << "Failed to start server" << std::endl;
+    if (!g_server->start()) {
+        std::cerr << "[ERROR] Failed to start server" << std::endl;
         return 1;
     }
 
-    std::cout << "Server started successfully. Waiting for requests...\n"
-              << "(Press Ctrl+C to stop)\n"
-              << std::endl;
+    // Main loop - use isRunning() instead of wait()
+    while (g_server->isRunning()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
 
-    // Run until shutdown
-    server->wait();
-
-    std::cout << "\nServer stopped." << std::endl;
     return 0;
 }

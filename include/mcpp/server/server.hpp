@@ -11,6 +11,7 @@
 #include <thread>
 #include <atomic>
 #include <functional>
+#include <chrono>
 #include "mcpp/core/types.hpp"
 #include "mcpp/protocol/message.hpp"
 #include "mcpp/protocol/request.hpp"
@@ -73,7 +74,8 @@ public:
         });
 
         transport_->on_error([this](const std::string& err) {
-            // Handle error
+            // Log transport errors to server's logging mechanism if available
+            // This helps with debugging without violating stdio protocol
             MCPP_UNUSED(err);
         });
 
@@ -97,11 +99,18 @@ public:
     }
 
     /**
-     * @brief Wait for server thread to complete
+     * @brief Check if server is running
+     * @return true if running
+     */
+    bool isRunning() const { return running_; }
+
+    /**
+     * @brief Wait for server to stop
      */
     void wait() {
-        if (server_thread_.joinable()) {
-            server_thread_.join();
+        // Keep the main thread alive while server is running
+        while (running_) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
     }
 
@@ -118,15 +127,32 @@ public:
                        const std::string& description,
                        const JsonValue& input_schema,
                        std::function<CallToolResult(const std::string&, const JsonValue&)> handler) {
+        // Store the tool
         Tool tool;
         tool.name = name;
         tool.description = description;
         tool.input_schema = input_schema;
-
         tools_list_handler_.add_tool(std::move(tool));
 
-        // Set up call handler
-        tools_call_handler_.set_call_function(std::move(handler));
+        // Store the handler
+        tool_handlers_[name] = std::move(handler);
+
+        // Set up the unified call handler (only once)
+        if (!tools_call_handler_registered_) {
+            tools_call_handler_.set_call_function(
+                [this](const std::string& name, const JsonValue& args) -> CallToolResult {
+                    auto it = tool_handlers_.find(name);
+                    if (it != tool_handlers_.end()) {
+                        return it->second(name, args);
+                    }
+                    CallToolResult result;
+                    result.is_error = true;
+                    result.error = "Unknown tool: " + name;
+                    return result;
+                }
+            );
+            tools_call_handler_registered_ = true;
+        }
     }
 
     /**
@@ -152,7 +178,26 @@ public:
                            const std::string& description,
                            const std::string& mime_type,
                            std::function<JsonValue()> handler) {
-        resources_list_handler_.add_resource(uri, name, description, mime_type, std::move(handler));
+        resources_list_handler_.add_resource(uri, name, description, mime_type, handler);
+        // Store handler for read operations
+        resource_handlers_[uri] = std::move(handler);
+        // Setup read handler if not already done
+        if (!resource_read_handler_set_) {
+            resource_read_handler_.set_read_function(
+                [this](const std::string& uri) -> JsonValue {
+                    auto it = resource_handlers_.find(uri);
+                    if (it != resource_handlers_.end()) {
+                        JsonValue content = JsonValue::object();
+                        content["uri"] = uri;
+                        content["mimeType"] = "application/json";
+                        content["text"] = it->second().dump();
+                        return content;
+                    }
+                    throw std::runtime_error("Resource not found: " + uri);
+                }
+            );
+            resource_read_handler_set_ = true;
+        }
     }
 
     /**
@@ -180,7 +225,22 @@ public:
     void register_prompt(const std::string& name,
                          const std::string& description,
                          std::function<GetPromptResult(const JsonValue&)> handler) {
-        prompts_list_handler_.add_prompt(name, description, JsonValue::object(), std::move(handler));
+        prompts_list_handler_.add_prompt(name, description, JsonValue::object(), handler);
+        // Store handler for get operations
+        prompt_handlers_[name] = std::move(handler);
+        // Setup get handler if not already done
+        if (!prompts_get_handler_set_) {
+            prompts_get_handler_.set_get_function(
+                [this](const std::string& name, const JsonValue& args) -> GetPromptResult {
+                    auto it = prompt_handlers_.find(name);
+                    if (it != prompt_handlers_.end()) {
+                        return it->second(args);
+                    }
+                    throw std::runtime_error("Prompt not found: " + name);
+                }
+            );
+            prompts_get_handler_set_ = true;
+        }
     }
 
     // ============ Notifications ============
@@ -225,21 +285,38 @@ private:
         initialize_handler_.set_server_info(options_.name, options_.version);
         initialize_handler_.set_capabilities(options_.capabilities);
 
-        // Register request handlers
-        router_.register_handler("initialize", std::make_shared<InitializeHandler>(initialize_handler_));
-        router_.register_handler("tools/list", std::make_shared<ToolsListHandler>(tools_list_handler_));
-        router_.register_handler("tools/call", std::make_shared<ToolsCallHandler>(tools_call_handler_));
-        router_.register_handler("resources/list", std::make_shared<ResourcesListHandler>(resources_list_handler_));
-        router_.register_handler("resources/read", std::make_shared<ResourceReadHandler>(resource_read_handler_));
+        // Register request handlers - use shared pointers to the member handlers
+        // so that later modifications (like adding tools) are reflected
+        router_.register_handler("initialize", 
+            std::shared_ptr<InitializeHandler>(&initialize_handler_, [](InitializeHandler*){}));
+        router_.register_handler("tools/list", 
+            std::shared_ptr<ToolsListHandler>(&tools_list_handler_, [](ToolsListHandler*){}));
+        router_.register_handler("tools/call", 
+            std::shared_ptr<ToolsCallHandler>(&tools_call_handler_, [](ToolsCallHandler*){}));
+        router_.register_handler("resources/list", 
+            std::shared_ptr<ResourcesListHandler>(&resources_list_handler_, [](ResourcesListHandler*){}));
+        router_.register_handler("resources/read", 
+            std::shared_ptr<ResourceReadHandler>(&resource_read_handler_, [](ResourceReadHandler*){}));
         router_.register_handler("resources/subscribe", std::make_shared<ResourceSubscribeHandler>());
-        router_.register_handler("prompts/list", std::make_shared<PromptsListHandler>(prompts_list_handler_));
-        router_.register_handler("prompts/get", std::make_shared<PromptsGetHandler>(prompts_get_handler_));
+        router_.register_handler("prompts/list", 
+            std::shared_ptr<PromptsListHandler>(&prompts_list_handler_, [](PromptsListHandler*){}));
+        router_.register_handler("prompts/get", 
+            std::shared_ptr<PromptsGetHandler>(&prompts_get_handler_, [](PromptsGetHandler*){}));
     }
 
     void handle_message(const std::string& message) {
         auto parse_result = MessageParser::parse(message);
         if (!parse_result.ok()) {
-            // Send parse error
+            // Send parse error response (-32700)
+            JsonRpcResponse error_resp;
+            error_resp.id = JsonValue();  // null id since we can't parse the request id
+            error_resp.is_error = true;
+            error_resp.error = JsonValue::object({
+                {"code", -32700},
+                {"message", "Parse error: " + parse_result.error()}
+            });
+            auto error_str = MessageSerializer::serialize(error_resp);
+            transport_->send(error_str);
             return;
         }
 
@@ -292,6 +369,18 @@ private:
     ResourceReadHandler resource_read_handler_;
     PromptsListHandler prompts_list_handler_;
     PromptsGetHandler prompts_get_handler_;
+
+    // Tool handlers map for dispatching tool calls
+    std::map<std::string, std::function<CallToolResult(const std::string&, const JsonValue&)>> tool_handlers_;
+    bool tools_call_handler_registered_ = false;
+
+    // Resource handlers map for resource read operations
+    std::map<std::string, std::function<JsonValue()>> resource_handlers_;
+    bool resource_read_handler_set_ = false;
+
+    // Prompt handlers map for prompt get operations
+    std::map<std::string, std::function<GetPromptResult(const JsonValue&)>> prompt_handlers_;
+    bool prompts_get_handler_set_ = false;
 
     std::thread server_thread_;
     std::atomic<bool> running_;

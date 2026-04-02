@@ -176,11 +176,24 @@ public:
         resp.result = JsonValue::object();
         resp.result["protocolVersion"] = "2025-06-18";
         resp.result["serverInfo"] = JsonValue::object({{"name", server_name_.empty() ? "mcpp-server" : server_name_}, {"version", server_version_.empty() ? "1.0.0" : server_version_}});
-        resp.result["capabilities"] = JsonValue::object({
-            {"tools", capabilities_.supports_tools},
-            {"resources", capabilities_.supports_resources},
-            {"prompts", capabilities_.supports_prompts}
-        });
+
+        JsonValue caps = JsonValue::object();
+        if (capabilities_.supports_tools) {
+            caps["tools"] = JsonValue::object({{"listChanged", true}});
+        }
+        if (capabilities_.supports_resources) {
+            caps["resources"] = JsonValue::object({{"listChanged", true}, {"subscribe", true}});
+        }
+        if (capabilities_.supports_prompts) {
+            caps["prompts"] = JsonValue::object({{"listChanged", true}});
+        }
+        if (capabilities_.supports_logging) {
+            caps["logging"] = JsonValue::object();
+        }
+        if (capabilities_.supports_sampling) {
+            caps["sampling"] = JsonValue::object();
+        }
+        resp.result["capabilities"] = caps;
         resp.is_error = false;
 
         return resp;
