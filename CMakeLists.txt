@@ -101,8 +101,8 @@ if(MCPP_BUILD_EXAMPLES)
     add_executable(example_stdio_server examples/stdio_server.cpp)
     target_link_libraries(example_stdio_server mcpp)
 
-    add_executable(example_client examples/client_example.cpp)
-    target_link_libraries(example_client mcpp)
+    add_executable(example_stdio_client examples/stdio_client.cpp)
+    target_link_libraries(example_stdio_client mcpp)
 endif()
 
 # Tests
